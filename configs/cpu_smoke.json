@@ -1,0 +1,25 @@
+{
+  "name": "official-ppo-cpu-smoke",
+  "source": {
+    "repository": "https://github.com/haosulab/ManiSkill",
+    "commit": "a4a4f9272ad64b1564035874b605ceb687b63ed8",
+    "entrypoint": "examples/baselines/ppo/ppo.py",
+    "sha256": "3fa4818861d428480244aae889bc679b2c8e89b59d6289014003c266a84dbab0"
+  },
+  "environment": {
+    "id": "PushCube-v1",
+    "control_mode": "pd_joint_delta_pos",
+    "simulation_backend": "physx_cpu"
+  },
+  "training": {
+    "seed": 9351,
+    "total_timesteps": 1000,
+    "num_envs": 1,
+    "num_steps": 50,
+    "update_epochs": 2,
+    "num_minibatches": 1,
+    "eval_frequency_iterations": 10,
+    "num_eval_envs": 1,
+    "num_eval_steps": 50
+  }
+}

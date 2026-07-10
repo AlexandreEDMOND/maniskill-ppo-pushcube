@@ -1,6 +1,6 @@
 # Experiment plan
 
-This document defines the comparison before implementation begins. Values marked **TBD** must be fixed during the environment and official-baseline validation phases, not tuned independently for each experiment.
+This document defines the comparison before implementation begins. Frozen values must not be tuned independently for each experiment.
 
 ## 1. Environment contract
 
@@ -11,27 +11,27 @@ The first smoke test must record and validate:
 | Environment | `PushCube-v1` |
 | Robot | Panda |
 | Observation mode | `state` |
-| Control mode | `pd_ee_delta_pose`; local smoke test validated its 7-dimensional action space |
-| Reward mode | `dense` for the baseline |
+| Control mode | `pd_joint_delta_pos` for the official baseline; `pd_ee_delta_pose` is a later comparison |
+| Reward mode | `normalized_dense` for the official baseline |
 | Maximum episode steps | 50 |
 | Training backend | Linux/NVIDIA GPU for full runs |
 | Development backend | macOS/CPU for smoke tests |
 | ManiSkill version | 3.0.1 |
 | Python version | 3.12 |
 
-If the official state-based baseline uses a different controller or wrapper stack, reproduce it unchanged first. Any controller change becomes a separate documented comparison.
+The official state-based baseline uses `pd_joint_delta_pos` through the default in `ppo_fast.py`. Any controller change is a separate documented comparison.
 
 ## 2. Experimental conditions
 
 ### A — Easy baseline
 
-- Dense ManiSkill reward.
+- Normalized dense ManiSkill reward.
 - Reduced cube and/or robot initial-state randomization.
 - Purpose: verify that the full training and evaluation pipeline can learn the task.
 
 ### B — Standard task
 
-- Dense ManiSkill reward.
+- Normalized dense ManiSkill reward.
 - Default task randomization.
 - Purpose: establish the primary reference result.
 
@@ -45,7 +45,7 @@ The curriculum comparison is a later phase and must use condition B as its direc
 
 ## 3. Evaluation protocol
 
-- Use at least three training seeds; start with `0`, `1`, and `2` unless the baseline has an established convention.
+- Use the official training seeds `9351`, `4796`, and `1788`.
 - Use a fixed, separate set of evaluation seeds.
 - Evaluate deterministic actions at a fixed environment-step interval.
 - Use the same training-step budget and evaluation episode count for every condition.
@@ -79,17 +79,18 @@ Primary metric: success rate. Primary sample-efficiency measure: environment ste
 ### Phase 0 — Environment validation
 
 - [x] Reset and step work on the local CPU backend.
-- [x] Observation `(1, 35)` and action `(7,)` shapes are documented.
+- [x] Observation `(1, 35)` and action shapes are documented: `(8,)` for the official joint controller and `(7,)` for the Cartesian smoke test.
 - [x] Seeded resets are checked for repeatability.
-- [ ] Success, reward, truncation, and final-distance signals are exposed by the evaluation pipeline.
+- [x] Success, reward, truncation, and final-distance signals are exposed by the evaluation pipeline.
 - [x] A random-policy video can be generated.
 
 ### Phase 1 — Official baseline
 
-- The exact upstream baseline revision and command are recorded.
-- At least one full training run completes on the Linux/NVIDIA machine.
-- Deterministic evaluation reaches at least 90% success.
-- A run can be resumed and evaluated from a checkpoint.
+- [x] The exact upstream baseline revision and command are recorded.
+- [x] A reduced CPU run validates training, checkpointing, evaluation, and video end to end.
+- [ ] All three 50-million-step runs complete on the Linux/NVIDIA machine.
+- [ ] Deterministic evaluation reaches at least 90% success.
+- [x] A checkpoint produced by the upstream trainer can be loaded by the fixed evaluator.
 
 ### Phase 2 — Custom PPO
 

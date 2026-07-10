@@ -7,5 +7,9 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "mani-skill==3.0.1",
     "pin==4.1.0",
+    "tensorboard==2.21.0",
+    "tensordict==0.13.0",
     "torch==2.13.0",
+    "torchrl==0.13.2",
+    "wandb==0.28.0",
 ]

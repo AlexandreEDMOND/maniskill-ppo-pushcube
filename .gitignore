@@ -11,6 +11,7 @@ htmlcov/
 # Environments and local configuration
 .venv/
 .uv-cache/
+/.cache/
 .env
 .env.*
 !.env.example

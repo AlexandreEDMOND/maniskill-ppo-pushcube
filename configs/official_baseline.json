@@ -1,0 +1,40 @@
+{
+  "name": "maniskill-v3.0.1-pushcube-state-ppo-fast",
+  "source": {
+    "repository": "https://github.com/haosulab/ManiSkill",
+    "commit": "a4a4f9272ad64b1564035874b605ceb687b63ed8",
+    "entrypoint": "examples/baselines/ppo/ppo_fast.py",
+    "sha256": "ffe4f019513de92d2d2e6638126422865bf24e06390f77df68e71a1d2e237f77"
+  },
+  "environment": {
+    "id": "PushCube-v1",
+    "robot": "panda",
+    "observation_mode": "state",
+    "control_mode": "pd_joint_delta_pos",
+    "reward_mode": "normalized_dense",
+    "simulation_backend": "physx_cuda",
+    "episode_steps": 50
+  },
+  "training": {
+    "seeds": [9351, 4796, 1788],
+    "total_timesteps": 50000000,
+    "num_envs": 4096,
+    "num_steps": 4,
+    "update_epochs": 8,
+    "num_minibatches": 32,
+    "learning_rate": 0.0003,
+    "gamma": 0.8,
+    "gae_lambda": 0.9,
+    "eval_frequency_iterations": 25,
+    "eval_frequency_environment_steps": 409600,
+    "num_eval_envs": 16,
+    "num_eval_steps": 50,
+    "cudagraphs": true
+  },
+  "evaluation": {
+    "seeds": [10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010, 10011, 10012, 10013, 10014, 10015, 10016, 10017, 10018, 10019],
+    "simulation_backend": "physx_cpu",
+    "deterministic_actions": true,
+    "video_seed": 10000
+  }
+}
