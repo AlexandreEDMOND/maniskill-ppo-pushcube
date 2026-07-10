@@ -1,0 +1,11 @@
+[project]
+name = "maniskill-ppo-pushcube"
+version = "0.1.0"
+description = "Reproducible PPO experiments on ManiSkill's PushCube-v1 task"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mani-skill==3.0.1",
+    "pin==4.1.0",
+    "torch==2.13.0",
+]
