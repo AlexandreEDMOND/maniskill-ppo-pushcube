@@ -53,6 +53,8 @@ uv run scripts/run_official_baseline.py --profile official --seed 9351
 
 See [the official baseline protocol](docs/OFFICIAL_BASELINE.md) for provenance, all frozen parameters, metric definitions, and the precise distinction between the CPU validation and the CUDA reproduction.
 
+For the exact commands to run on the Toulouse RTX 3090 machine, see [the Toulouse GPU runbook](docs/TOULOUSE_GPU_RUNBOOK.md).
+
 ## Planned experiments
 
 | ID | Setup | Reward | Initial-state randomization |
