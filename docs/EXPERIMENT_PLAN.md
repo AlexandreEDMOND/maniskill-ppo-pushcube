@@ -88,9 +88,11 @@ Primary metric: success rate. Primary sample-efficiency measure: environment ste
 
 - [x] The exact upstream baseline revision and command are recorded.
 - [x] A reduced CPU run validates training, checkpointing, evaluation, and video end to end.
-- [ ] All three 50-million-step runs complete on the Linux/NVIDIA machine.
-- [ ] Deterministic evaluation reaches at least 90% success.
+- [x] The 50-million-step CUDA reference run for seed `9351` completes and reaches at least 90% deterministic-evaluation success.
+- [ ] Aggregate results across three official seeds are available when final results are assembled.
 - [x] A checkpoint produced by the upstream trainer can be loaded by the fixed evaluator.
+
+The authoritative implementation status and sequencing are in [ROADMAP.md](../ROADMAP.md).
 
 ### Phase 2 — Custom PPO
 
