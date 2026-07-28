@@ -14,7 +14,7 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | Short validation complete | The 5,000-step CPU run raises five-seed mean return from 1.90 to 6.64. The shared 20-seed evaluator loads its checkpoint and records a video, but task success remains 0%. |
+| Custom PPO | Learning validation incomplete | The 5,000-step CPU run raises five-seed mean return from 1.90 to 6.64. At 50,000 steps, the shared 20-seed evaluation still reports 0% success and no distance improvement. |
 | Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
@@ -43,8 +43,8 @@ uv run scripts/train_custom_ppo.py \
 uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 ```
 
-- [ ] Record the success rate, return, and final cube-to-goal distance against the 5,000-step check.
-- [ ] Confirm that the longer run produces at least one successful fixed-seed episode before treating it as a learning baseline.
+- [x] Record the success rate, return, and final cube-to-goal distance against the 5,000-step check. The 20-seed return rises from 7.11 to 8.12, while final distance changes from 0.2016 to 0.2026.
+- [ ] Confirm that the longer run produces at least one successful fixed-seed episode before treating it as a learning baseline. **Not met:** 0/20 successes at 50,000 steps.
 - [ ] If it does not, diagnose the training behavior before changing the frozen experiment conditions.
 
 ## Experiments after custom PPO
