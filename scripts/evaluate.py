@@ -18,6 +18,8 @@ import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 from mani_skill.utils.wrappers.record import RecordEpisode  # noqa: E402
 
+from custom_ppo import CHECKPOINT_FORMAT, CustomPPOAgent  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/official_baseline.json"
 
@@ -63,17 +65,30 @@ def make_env(config: dict, render: bool):
     )
 
 
-def load_agent(checkpoint: Path, env) -> OfficialPPOAgent:
+def load_agent(checkpoint: Path, env) -> nn.Module:
     observation_size = env.observation_space.shape[-1]
     action_size = env.action_space.shape[-1]
-    agent = OfficialPPOAgent(observation_size, action_size)
-    state_dict = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    checkpoint_data = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    if checkpoint_data.get("format") == CHECKPOINT_FORMAT:
+        if checkpoint_data["observation_size"] != observation_size:
+            raise RuntimeError("Custom checkpoint observation size does not match the environment")
+        if checkpoint_data["action_size"] != action_size:
+            raise RuntimeError("Custom checkpoint action size does not match the environment")
+        agent = CustomPPOAgent(
+            observation_size,
+            action_size,
+            checkpoint_data["hidden_size"],
+        )
+        state_dict = checkpoint_data["state_dict"]
+    else:
+        agent = OfficialPPOAgent(observation_size, action_size)
+        state_dict = checkpoint_data
     agent.load_state_dict(state_dict, strict=True)
     agent.eval()
     return agent
 
 
-def run_episode(env, agent: OfficialPPOAgent, seed: int) -> dict:
+def run_episode(env, agent: nn.Module, seed: int) -> dict:
     observation, _ = env.reset(seed=seed)
     episode_return = 0.0
     success_once = False
@@ -147,7 +162,7 @@ def aggregate(episodes: list[dict]) -> dict:
     }
 
 
-def record_video(config: dict, agent: OfficialPPOAgent, seed: int, output_dir: Path) -> Path:
+def record_video(config: dict, agent: nn.Module, seed: int, output_dir: Path) -> Path:
     video_dir = output_dir / "videos"
     existing_videos = set(video_dir.glob("*.mp4"))
     env = make_env(config, render=True)
@@ -192,7 +207,10 @@ def main() -> None:
         env.close()
 
     report = {
-        "baseline": config["name"],
+        "agent": (
+            CHECKPOINT_FORMAT if isinstance(agent, CustomPPOAgent) else config["name"]
+        ),
+        "evaluation_protocol": config["name"],
         "checkpoint": portable_path(args.checkpoint),
         "checkpoint_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
         "config": portable_path(args.config),

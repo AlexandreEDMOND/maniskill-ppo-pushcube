@@ -14,23 +14,38 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | Not started | No custom implementation has been added. |
+| Custom PPO | Short validation complete | The 5,000-step CPU run raises five-seed mean return from 1.90 to 6.64. The shared 20-seed evaluator loads its checkpoint and records a video, but task success remains 0%. |
 | Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
 Experiment outputs remain ignored by Git. The `9351` artifacts above are therefore local evidence, not versioned project files.
 
-## Next milestone — minimal custom PPO
+## Completed milestone — minimal custom PPO
 
 Implement a small state-based PPO trainer that uses the same task contract and evaluation pipeline as the official reference.
 
-- [ ] Add a minimal actor-critic MLP.
-- [ ] Add rollout collection, GAE, clipped policy objective, value loss, and entropy bonus.
-- [ ] Add focused tests for the PPO calculations.
-- [ ] Verify that a short training run improves over a random policy.
-- [ ] Evaluate the custom checkpoint through `scripts/evaluate.py` with fixed evaluation seeds.
+- [x] Add a minimal actor-critic MLP.
+- [x] Add rollout collection, GAE, clipped policy objective, value loss, and entropy bonus.
+- [x] Add focused tests for the PPO calculations.
+- [x] Verify that a 5,000-step CPU run improves deterministic mean return over the initial policy (1.90 to 6.64 on five fixed seeds).
+- [x] Evaluate the custom checkpoint through `scripts/evaluate.py` on 20 fixed seeds and record a video.
 
-**Exit criterion:** a reproducible short run shows learning and produces the shared evaluation report and video. The first full comparison must use the same environment-step budget and evaluation protocol as the official baseline.
+The short run is an integration check, not a competitive result: its 20-seed success rate remains 0%. The first full comparison must use the same environment-step budget and evaluation protocol as the official baseline.
+
+## Next milestone — demonstrate task completion
+
+Run the custom PPO for 50,000 CPU interactions with the frozen configuration, then evaluate it with the shared 20-seed protocol.
+
+```bash
+uv run scripts/train_custom_ppo.py \
+  --total-timesteps 50000 \
+  --output-dir runs/custom-ppo-cpu-50k
+uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
+```
+
+- [ ] Record the success rate, return, and final cube-to-goal distance against the 5,000-step check.
+- [ ] Confirm that the longer run produces at least one successful fixed-seed episode before treating it as a learning baseline.
+- [ ] If it does not, diagnose the training behavior before changing the frozen experiment conditions.
 
 ## Experiments after custom PPO
 
