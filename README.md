@@ -83,6 +83,10 @@ three training seeds.
 
 ![Checkpoint curves for the 3M pilot](docs/images/custom_ppo_time_penalty_3m.png)
 
+For the dense-reward control alone, the full checkpoint evolution is also available:
+
+![Dense-control checkpoint curves](docs/images/custom_ppo_dense_control_3m.png)
+
 The reusable plotting command is:
 
 ```bash

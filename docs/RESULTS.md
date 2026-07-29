@@ -18,6 +18,25 @@ best one is selected by success rate, then final distance, then return.
 
 ![Checkpoint comparison](images/custom_ppo_time_penalty_3m.png)
 
+## Dense-control checkpoint evolution
+
+Every row is a checkpoint evaluated on the same fixed 20 seeds. Return is the
+unmodified ManiSkill dense return used for diagnosis; it is not the selection
+criterion. Lower distance is better. Action standard deviation (sigma) is the
+policy's exploration scale: its gradual decline is expected, while a sudden fall
+near zero would indicate premature loss of exploration.
+
+| Interactions | Success | Return | Final distance | Action sigma | Learning rate |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 507,904 | 75% | 7.90 | 0.1057 m | 0.910 | 2.51e-4 |
+| 1,015,808 | **85%** | 5.47 | **0.1002 m** | 0.832 | 2.01e-4 |
+| 1,507,328 | 80% | 6.47 | 0.1131 m | 0.762 | 1.52e-4 |
+| 2,015,232 | 35% | 9.72 | 0.2345 m | 0.703 | 1.01e-4 |
+| 2,506,752 | 55% | 8.05 | 0.1368 m | 0.668 | 5.22e-5 |
+| 3,014,656 | 65% | 7.55 | 0.1114 m | 0.655 | 1.63e-6 |
+
+![Dense-control checkpoint curves](images/custom_ppo_dense_control_3m.png)
+
 ## Interpretation
 
 The per-step cost is intended to make reward favour task completion without
