@@ -15,7 +15,7 @@ The first smoke test must record and validate:
 | Reward mode | `normalized_dense` for the official baseline |
 | Maximum episode steps | 50 |
 | Training backend | Linux/NVIDIA GPU for full runs |
-| Development backend | macOS/CPU for smoke tests |
+| Development backend | Linux/NVIDIA CUDA; CPU only for fixed evaluation and smoke checks |
 | ManiSkill version | 3.0.1 |
 | Python version | 3.12 |
 

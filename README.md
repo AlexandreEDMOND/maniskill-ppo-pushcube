@@ -6,26 +6,28 @@ A reproducible study of how reward shaping and initial-state randomization affec
 
 The environment and official ManiSkill PPO pipeline have been validated locally. The official CUDA baseline for seed `9351` is complete and reaches 100% success on the fixed 20-episode deterministic evaluation. Its checkpoint and evaluation are kept as local experiment artifacts, outside Git.
 
-The project now keeps that result as its reference run. The minimal custom PPO uses bounded Gaussian actions and passes its CPU integration run. The CUDA custom trainer now uses periodic fixed-seed checkpoint selection, learning-rate decay, and conservative PPO updates; a 3-million-step pilot reaches 85% success on the shared evaluator. This is encouraging, but it is one training seed rather than a final comparison. Additional official seeds will be run only when assembling final aggregate results.
+The project now keeps that result as its reference run. The minimal custom PPO uses bounded Gaussian actions and passes its CPU integration run. The CUDA custom trainer now uses periodic fixed-seed checkpoint selection, learning-rate decay, and conservative PPO updates; its 5-million-step pilot reaches 95% success and remains at that level from 3M to 5M interactions. This is encouraging, but it is one training seed rather than a final comparison. Additional official seeds will be run only when assembling final aggregate results.
 
 See [ROADMAP.md](ROADMAP.md) for the authoritative progress tracker and next steps.
 
 ## Quick start
 
-The project uses Python 3.12 and [uv](https://docs.astral.sh/uv/).
+The project targets Linux, an NVIDIA GPU, CUDA, and Python 3.12. The validated
+machine has an NVIDIA GeForce RTX 3090 (24 GB VRAM), an AMD Ryzen 9 5950X
+(16 cores / 32 threads), and 24 GB RAM; training uses ManiSkill's `physx_cuda` backend.
+The fixed checkpoint evaluator intentionally uses CPU PhysX so its 20 seeded episodes
+remain lightweight, deterministic, and independent of training throughput.
+
+The project uses [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --frozen
 uv run scripts/smoke_test.py
 ```
 
-The smoke test runs one seeded CPU-simulator episode, checks determinism and the 50-step limit, and writes a random-policy video to `videos/smoke-test/`.
-
-On macOS, rendering requires Vulkan. If MoltenVK is not already available:
-
-```bash
-brew install molten-vk vulkan-loader vulkan-tools
-```
+The smoke test checks a seeded CPU-simulator episode and video recording. Before a
+CUDA training run, confirm that `nvidia-smi` works and that
+`uv run python -c "import torch; assert torch.cuda.is_available()"` succeeds.
 
 ## Scope
 
@@ -36,7 +38,7 @@ brew install molten-vk vulkan-loader vulkan-tools
 - Algorithm: PPO
 - Episode horizon: 50 steps
 
-Full training runs require Linux, NVIDIA CUDA, and ManiSkill's `physx_cuda` backend; macOS is for smoke tests and short CPU validation runs.
+Full training runs require Linux, NVIDIA CUDA, and ManiSkill's `physx_cuda` backend.
 
 ## Key commands
 
@@ -63,6 +65,11 @@ uv run scripts/train_custom_ppo.py \
   --config configs/custom_ppo_cuda.json \
   --total-timesteps 500000 \
   --output-dir runs/custom-ppo-cuda-500k
+
+# Conservative PPO stability test (5M interactions).
+uv run scripts/train_custom_ppo.py \
+  --config configs/custom_ppo_cuda_conservative.json \
+  --output-dir runs/custom-ppo-cuda-conservative-5M
 ```
 
 The CUDA configuration saves and evaluates a checkpoint every 500,000 requested
@@ -102,16 +109,35 @@ The shared evaluator also records representative MP4 videos locally under
 committed). See [the pilot report](docs/RESULTS.md) for the exact measurements and
 interpretation.
 
+## Conservative PPO 5M pilot
+
+The dense reward is retained. To make PPO updates less destructive, this run uses
+an initial learning rate of `1e-4`, `target_kl=0.03`, and two update epochs (instead
+of `3e-4`, `0.10`, and four). On the fixed 20-seed evaluator it reaches **95%
+(19/20) success at 3.01M** and keeps 95% through 5.01M interactions. The selected
+checkpoint is at 4.51M; an independent full evaluation confirms 95% success,
+13.1 steps to success, and 0.0948 m final distance. This is a combined stability
+test, so it cannot attribute the improvement to one hyperparameter or establish a
+multi-seed conclusion.
+
+![Conservative PPO checkpoint curves](docs/images/custom_ppo_conservative_5m.png)
+
+[![Representative successful rollout; open the MP4](docs/images/custom_ppo_conservative_5m_preview.gif)](docs/videos/custom_ppo_conservative_5m_best.mp4)
+
+_Representative deterministic rollout from the selected 5M checkpoint. Click the
+preview to open the MP4._
+
 ## Documentation
 
 - [Roadmap](ROADMAP.md): current status, milestones, and completion criteria
 - [Custom PPO CPU configuration](configs/custom_ppo_cpu.json): short local training run
 - [Custom PPO CUDA configuration](configs/custom_ppo_cuda.json): vectorized matched-budget run
+- [Conservative CUDA configuration](configs/custom_ppo_cuda_conservative.json): selected 5M stability setting
 - [Time-cost reward configuration](configs/custom_ppo_cuda_time_penalty.json): 3M reward-alignment ablation
 - [Pilot results](docs/RESULTS.md): 3M control versus time-cost comparison
+- [PPO investigation log](docs/PPO_INVESTIGATION.md): hypotheses, configurations, observations, and conclusions
 - [Experiment plan](docs/EXPERIMENT_PLAN.md): frozen comparison protocol and metrics
 - [Official baseline](docs/OFFICIAL_BASELINE.md): upstream provenance and parameters
-- [Toulouse GPU runbook](docs/TOULOUSE_GPU_RUNBOOK.md): Linux/RTX 3090 setup and commands
 
 ## References
 

@@ -5,11 +5,6 @@ from __future__ import annotations
 import platform
 from pathlib import Path
 
-from _platform import configure_macos_vulkan
-
-
-configure_macos_vulkan()
-
 import gymnasium as gym  # noqa: E402
 import mani_skill  # noqa: E402
 import mani_skill.envs  # noqa: E402,F401

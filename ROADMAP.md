@@ -14,7 +14,7 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | 3M stabilization pilot complete | Periodic selection, learning-rate decay, and four update epochs reach 17/20 successes (85%) on the fixed evaluator. The standard dense-reward selected policy reaches success in 15.6 steps on average. |
+| Custom PPO | 5M conservative pilot complete | The dense-reward package (LR `1e-4`, target KL `0.03`, two epochs) reaches 19/20 successes (95%) and retains 95% from 3M to 5M. The selected policy reaches success in 13.1 steps on average. |
 | Reward experiment C | Pilot complete; replication pending | A `-0.01` per-step reward cost also reaches 17/20 and is more stable late in one run, but reaches success more slowly (30.7 steps). Repeat across three seeds before drawing a conclusion. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
@@ -51,7 +51,7 @@ uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. The vectorized CUDA trainer is ready; the single-environment CPU implementation remains the integration-test path.
 
 - [x] Implement vectorized CUDA rollout collection and validate a `4,096 × 4` rollout on the RTX 3090 (2,403 interactions/s).
-- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, periodic checkpoint selection, learning-rate decay, and conservative four-epoch updates. The 3M standard-reward pilot selects a 17/20-success checkpoint.
+- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, periodic checkpoint selection, learning-rate decay, and conservative updates. The 5M dense-reward conservative pilot selects a 19/20-success checkpoint and retains that success rate through its final checkpoint.
 - [ ] Train and evaluate seed `9351` for 50 million interactions with the shared protocol.
 - [x] Confirm successful fixed-seed episodes before starting ablations.
 
@@ -76,7 +76,8 @@ When results are ready to be finalized, run and evaluate the official seeds `479
 - [ ] Aggregate the three official seeds as mean +/- standard deviation.
 - [ ] Confirm the fixed evaluator reaches at least 90% success for every seed.
 
-The exact Linux/RTX 3090 procedure is in [docs/TOULOUSE_GPU_RUNBOOK.md](docs/TOULOUSE_GPU_RUNBOOK.md).
+The project targets the validated Linux/NVIDIA CUDA workstation; CUDA is required
+for all full training runs.
 
 ## Later milestone — curriculum
 

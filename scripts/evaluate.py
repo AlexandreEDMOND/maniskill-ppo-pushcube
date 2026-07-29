@@ -8,10 +8,6 @@ import json
 import statistics
 from pathlib import Path
 
-from _platform import configure_macos_vulkan
-
-configure_macos_vulkan()
-
 import gymnasium as gym  # noqa: E402
 import mani_skill.envs  # noqa: E402,F401
 import torch  # noqa: E402
@@ -226,7 +222,7 @@ def main() -> None:
         video_path = record_video(
             config,
             agent,
-            config["evaluation"]["video_seed"],
+            config["evaluation"].get("video_seed", config["evaluation"]["seeds"][0]),
             output_dir,
         )
         report["video"] = portable_path(video_path, ROOT)

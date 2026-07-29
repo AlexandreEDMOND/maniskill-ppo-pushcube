@@ -1,10 +1,14 @@
-# 3M custom PPO reward-alignment pilot
+# Custom PPO pilot results
 
-This pilot compares two custom PPO runs on `PushCube-v1` using seed `9351` and the
-same fixed deterministic 20-episode evaluator. Both use 4,096 CUDA environments,
-four rollout steps, entropy coefficient `0.005`, four update epochs, and linear
-learning-rate decay. Checkpoints are evaluated every 500,000 interactions and the
-best one is selected by success rate, then final distance, then return.
+All pilots use `PushCube-v1`, training seed `9351`, and the same fixed deterministic
+20-episode evaluator. Checkpoints are evaluated every 500,000 interactions and the
+best one is selected by success rate, then final distance, then return. One seed is
+useful evidence, but not a final comparison.
+
+## 3M reward-alignment comparison
+
+Both 3M conditions use 4,096 CUDA environments, four rollout steps, entropy
+coefficient `0.005`, four update epochs, and linear learning-rate decay.
 
 | Measure | Stabilized dense reward | Dense reward minus 0.01/step |
 | --- | ---: | ---: |
@@ -58,3 +62,33 @@ The evaluated local videos are:
 
 Those are generated artifacts and remain outside Git. Regenerate them with
 `scripts/evaluate.py` without `--no-video`.
+
+## 5M conservative-update pilot
+
+This dense-reward run changes the update-size controls together: learning rate
+`3e-4` to `1e-4`, target KL `0.10` to `0.03`, and update epochs four to two. All
+other environment, network, rollout, entropy, checkpoint-selection, and evaluation
+settings are unchanged.
+
+| Measure | Conservative 5M result |
+| --- | ---: |
+| Requested / executed interactions | 5,000,000 / 5,013,504 |
+| Selected checkpoint | 4,505,600 interactions |
+| Selected and independently evaluated success rate | **95% (19/20)** |
+| Success rate from 3.01M through 5.01M | **95% at every checkpoint** |
+| Mean episode length | 14.95 |
+| Mean steps to success | **13.11** |
+| Final cube-to-goal distance | **0.0948 m** |
+| Action sigma, first to last checkpoint | 0.983 to 0.907 |
+| Approximate KL, first to last checkpoint | 0.0106 to 0.0023 |
+
+![Conservative PPO checkpoint curves](images/custom_ppo_conservative_5m.png)
+
+[![Representative selected-policy rollout](images/custom_ppo_conservative_5m_preview.gif)](videos/custom_ppo_conservative_5m_best.mp4)
+
+The success curve rises from 0% at 508k to 55% at 1.02M, 85% at 1.51M, 90% at
+2.51M, and 95% at 3.01M. It then stays at 95% through the final 5.01M checkpoint.
+This is substantially more stable than the previous dense 3M control, which fell
+from its 85% peak to 35% at 2.02M. The evidence supports the *combined conservative
+package*, not any individual parameter: repeat it on seeds `4796` and `1788` before
+making a general claim or choosing a final 50M setting.

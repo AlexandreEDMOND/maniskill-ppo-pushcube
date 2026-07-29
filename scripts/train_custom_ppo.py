@@ -9,7 +9,6 @@ import random
 import time
 from pathlib import Path
 
-from _platform import configure_macos_vulkan
 from custom_ppo import (
     CHECKPOINT_FORMAT,
     CustomPPOAgent,
@@ -17,8 +16,6 @@ from custom_ppo import (
     compute_gae,
     portable_path,
 )
-
-configure_macos_vulkan()
 
 import gymnasium as gym  # noqa: E402
 import mani_skill.envs  # noqa: E402,F401

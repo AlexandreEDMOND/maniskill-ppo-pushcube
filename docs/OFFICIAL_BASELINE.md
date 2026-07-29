@@ -48,9 +48,12 @@ done
 
 The runner refuses to start the official profile when CUDA is unavailable. This prevents a CPU run from being mislabeled as the official reproduction.
 
-## Local CPU validation
+## Optional CPU integration validation
 
-The Mac validation uses the uncompiled upstream `ppo.py` from the same commit. The runner verifies its checksum and creates a transient copy whose only source change is `physx_cuda` → `physx_cpu`.
+The optional CPU check uses the uncompiled upstream `ppo.py` from the same commit.
+The runner verifies its checksum and creates a transient copy whose only source
+change is `physx_cuda` → `physx_cpu`. It is useful for integration diagnostics, but
+the project targets Linux/NVIDIA CUDA for all substantive training.
 
 ```bash
 uv run scripts/run_official_baseline.py --profile cpu-smoke

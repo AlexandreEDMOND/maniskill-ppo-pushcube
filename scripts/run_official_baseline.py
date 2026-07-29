@@ -13,8 +13,6 @@ from pathlib import Path
 
 import torch
 
-from _platform import configure_macos_vulkan
-
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = {
     "official": ROOT / "configs/official_baseline.json",
@@ -126,7 +124,7 @@ def main() -> None:
     else:
         command = smoke_command(config, cpu_compatible_copy(source_path))
 
-    environment = configure_macos_vulkan(os.environ.copy())
+    environment = os.environ.copy()
     environment["PYTHONHASHSEED"] = str(
         args.seed if args.profile == "official" else config["training"]["seed"]
     )
