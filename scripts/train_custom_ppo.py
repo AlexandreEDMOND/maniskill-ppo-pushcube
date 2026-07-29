@@ -30,7 +30,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/custom_ppo_cpu.json"
 
 
-def make_env(config: dict, num_envs: int = 1):
+def make_env(
+    config: dict, num_envs: int = 1, simulation_backend: str | None = None
+):
     environment = config["environment"]
     return gym.make(
         environment["id"],
@@ -38,7 +40,7 @@ def make_env(config: dict, num_envs: int = 1):
         obs_mode=environment["observation_mode"],
         control_mode=environment["control_mode"],
         reward_mode=environment["reward_mode"],
-        sim_backend=environment["simulation_backend"],
+        sim_backend=simulation_backend or environment["simulation_backend"],
         render_mode=None,
         num_envs=num_envs,
         reconfiguration_freq=0,
@@ -60,9 +62,27 @@ def make_training_env(config: dict, num_envs: int) -> ManiSkillVectorEnv:
 
 
 def evaluate(agent: CustomPPOAgent, config: dict, seeds: list[int]) -> dict[str, float]:
-    env = make_env(config)
+    """Run the fixed deterministic evaluator used to select custom checkpoints."""
+    evaluation_backend = config["evaluation"].get(
+        "simulation_backend", config["environment"]["simulation_backend"]
+    )
+    evaluation_agent = agent
+    if evaluation_backend == "physx_cpu" and next(agent.parameters()).is_cuda:
+        evaluation_agent = CustomPPOAgent(
+            observation_size=agent.actor_mean[0].in_features,
+            action_size=agent.actor_logstd.shape[-1],
+            hidden_size=agent.actor_mean[0].out_features,
+            squash_actions=agent.squash_actions,
+            hidden_layers=agent.hidden_layers,
+            initial_logstd=agent.initial_logstd,
+        )
+        evaluation_agent.load_state_dict(agent.state_dict())
+    evaluation_agent.eval()
+
+    env = make_env(config, simulation_backend=evaluation_backend)
     successes = []
     returns = []
+    final_distances = []
     try:
         for seed in seeds:
             observation, _ = env.reset(seed=seed)
@@ -71,19 +91,56 @@ def evaluate(agent: CustomPPOAgent, config: dict, seeds: list[int]) -> dict[str,
             success = False
             while not done:
                 with torch.inference_mode():
-                    action = agent.deterministic_action(observation)
+                    action = evaluation_agent.deterministic_action(
+                        observation.to(next(evaluation_agent.parameters()).device)
+                    )
                 observation, reward, terminated, truncated, info = env.step(action)
                 episode_return += float(reward.item())
                 success = success or bool(info["success"].item())
                 done = bool((terminated | truncated).item())
             successes.append(float(success))
             returns.append(episode_return)
+            base_env = env.unwrapped
+            final_distances.append(
+                torch.linalg.vector_norm(
+                    base_env.obj.pose.p[0, :2] - base_env.goal_region.pose.p[0, :2]
+                ).item()
+            )
     finally:
         env.close()
     return {
         "success_rate": sum(successes) / len(successes),
         "return_mean": sum(returns) / len(returns),
+        "final_cube_to_goal_distance_mean": sum(final_distances) / len(final_distances),
     }
+
+
+def checkpoint_payload(
+    agent: CustomPPOAgent,
+    observation_size: int,
+    action_size: int,
+    step: int,
+) -> dict:
+    return {
+        "format": CHECKPOINT_FORMAT,
+        "observation_size": observation_size,
+        "action_size": action_size,
+        "hidden_size": agent.actor_mean[0].out_features,
+        "hidden_layers": agent.hidden_layers,
+        "initial_logstd": agent.initial_logstd,
+        "squash_actions": agent.squash_actions,
+        "step": step,
+        "state_dict": agent.state_dict(),
+    }
+
+
+def checkpoint_score(metrics: dict[str, float]) -> tuple[float, float, float]:
+    """Rank checkpoints by success first, then final distance and return."""
+    return (
+        metrics["success_rate"],
+        -metrics["final_cube_to_goal_distance_mean"],
+        metrics["return_mean"],
+    )
 
 
 def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> dict:
@@ -102,6 +159,14 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
             f"Requested {total_timesteps:,} steps; vector rollouts will run "
             f"{planned_steps:,} steps ({batch_size:,} per update)."
         )
+    checkpoint_interval_steps = training.get("checkpoint_interval_steps")
+    if checkpoint_interval_steps is not None and checkpoint_interval_steps <= 0:
+        raise ValueError("checkpoint_interval_steps must be positive")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = output_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+    checkpoint_metrics_path = output_dir / "checkpoint_metrics.json"
 
     env = make_training_env(config, num_envs)
     try:
@@ -118,8 +183,58 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         evaluation_seeds = config["evaluation"]["seeds"]
         initial_evaluation = evaluate(agent, config, evaluation_seeds)
 
+        checkpoint_results: list[dict] = []
+        best_checkpoint_path: Path | None = None
+        best_score: tuple[float, float, float] | None = None
+        diagnostics = {
+            "approx_kl": torch.zeros((), device=env.device),
+            "clip_fraction": torch.zeros((), device=env.device),
+            "policy_loss": torch.zeros((), device=env.device),
+            "value_loss": torch.zeros((), device=env.device),
+            "entropy": torch.zeros((), device=env.device),
+        }
+        diagnostic_count = 0
+
+        def save_and_evaluate_checkpoint(step: int, filename: str) -> dict:
+            nonlocal best_checkpoint_path, best_score, diagnostic_count
+            checkpoint_path = checkpoint_dir / filename
+            torch.save(
+                checkpoint_payload(agent, observation_size, action_size, step),
+                checkpoint_path,
+            )
+            metrics = evaluate(agent, config, evaluation_seeds)
+            diagnostic_means = {
+                name: (total / diagnostic_count).item() if diagnostic_count else 0.0
+                for name, total in diagnostics.items()
+            }
+            diagnostic_means["action_std_mean"] = agent.actor_logstd.exp().mean().item()
+            diagnostic_means["action_std_min"] = agent.actor_logstd.exp().min().item()
+            result = {
+                "step": step,
+                "checkpoint": portable_path(checkpoint_path, ROOT),
+                "evaluation": metrics,
+                "diagnostics": diagnostic_means,
+            }
+            checkpoint_results.append(result)
+            if best_score is None or checkpoint_score(metrics) > best_score:
+                best_score = checkpoint_score(metrics)
+                best_checkpoint_path = checkpoint_dir / "best_ckpt.pt"
+                torch.save(
+                    checkpoint_payload(agent, observation_size, action_size, step),
+                    best_checkpoint_path,
+                )
+                result["is_best"] = True
+            checkpoint_metrics_path.write_text(
+                json.dumps(checkpoint_results, indent=2) + "\n"
+            )
+            for total in diagnostics.values():
+                total.zero_()
+            diagnostic_count = 0
+            return metrics
+
         observation, _ = env.reset(seed=seed)
         completed_steps = 0
+        next_checkpoint_step = checkpoint_interval_steps
         start_time = time.perf_counter()
         with tqdm(
             total=planned_steps,
@@ -138,6 +253,9 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                 log_probabilities = torch.zeros(rollout_steps, num_envs, device=env.device)
                 rewards = torch.zeros(rollout_steps, num_envs, device=env.device)
                 dones = torch.zeros(rollout_steps, num_envs, device=env.device)
+                bootstrap_values = torch.zeros(
+                    rollout_steps, num_envs, device=env.device
+                )
                 values = torch.zeros(rollout_steps, num_envs, device=env.device)
 
                 for step in range(rollout_steps):
@@ -149,11 +267,16 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                     latent_actions[step] = latent_action
                     log_probabilities[step] = log_probability
                     values[step] = value
-                    next_observation, reward, terminated, truncated, _ = env.step(
+                    next_observation, reward, terminated, truncated, info = env.step(
                         agent.environment_action(latent_action)
                     )
                     rewards[step] = reward
                     dones[step] = (terminated | truncated).float()
+                    if truncated.any():
+                        with torch.no_grad():
+                            bootstrap_values[step, truncated] = agent.value(
+                                info["final_observation"][truncated]
+                            )
                     observation = next_observation
                     completed_steps += num_envs
 
@@ -166,6 +289,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                         last_value,
                         training["gamma"],
                         training["gae_lambda"],
+                        bootstrap_values,
                     )
 
                 flat_observations = observations.flatten(0, 1)
@@ -173,12 +297,22 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                 flat_log_probabilities = log_probabilities.flatten()
                 flat_advantages = advantages.flatten()
                 flat_returns = returns.flatten()
+                target_kl = training.get("target_kl")
                 for _ in range(training["update_epochs"]):
                     indices = torch.randperm(batch_size, device=env.device)
+                    epoch_kl = torch.zeros((), device=env.device)
+                    epoch_batches = 0
                     for batch_indices in indices.split(training["minibatch_size"]):
                         _, new_log_probabilities, entropy, new_values = agent.get_action_and_value(
                             flat_observations[batch_indices], flat_latent_actions[batch_indices]
                         )
+                        log_ratio = new_log_probabilities - flat_log_probabilities[batch_indices]
+                        ratio = log_ratio.exp()
+                        with torch.no_grad():
+                            approx_kl = ((ratio - 1.0) - log_ratio).mean()
+                            clip_fraction = (
+                                (ratio - 1.0).abs() > training["clip_coefficient"]
+                            ).float().mean()
                         normalized_advantages = flat_advantages[batch_indices]
                         normalized_advantages = (
                             normalized_advantages - normalized_advantages.mean()
@@ -201,25 +335,42 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(agent.parameters(), training["max_grad_norm"])
                         optimizer.step()
+                        diagnostics["approx_kl"] += approx_kl
+                        diagnostics["clip_fraction"] += clip_fraction
+                        diagnostics["policy_loss"] += policy_loss.detach()
+                        diagnostics["value_loss"] += value_loss.detach()
+                        diagnostics["entropy"] += entropy.detach().mean()
+                        diagnostic_count += 1
+                        epoch_kl += approx_kl
+                        epoch_batches += 1
+                    if target_kl is not None and (epoch_kl / epoch_batches).item() > target_kl:
+                        break
                 progress.update(batch_size)
+                if (
+                    next_checkpoint_step is not None
+                    and completed_steps >= next_checkpoint_step
+                ):
+                    checkpoint_metrics = save_and_evaluate_checkpoint(
+                        completed_steps, f"ckpt_{completed_steps}.pt"
+                    )
+                    progress.set_postfix(
+                        success=f"{checkpoint_metrics['success_rate']:.0%}",
+                        distance=f"{checkpoint_metrics['final_cube_to_goal_distance_mean']:.3f}",
+                    )
+                    next_checkpoint_step += checkpoint_interval_steps
         training_duration = time.perf_counter() - start_time
 
-        output_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_path = output_dir / "final_ckpt.pt"
         torch.save(
-            {
-                "format": CHECKPOINT_FORMAT,
-                "observation_size": observation_size,
-                "action_size": action_size,
-                "hidden_size": training["hidden_size"],
-                "hidden_layers": agent.hidden_layers,
-                "initial_logstd": agent.initial_logstd,
-                "squash_actions": agent.squash_actions,
-                "state_dict": agent.state_dict(),
-            },
+            checkpoint_payload(agent, observation_size, action_size, completed_steps),
             checkpoint_path,
         )
-        final_evaluation = evaluate(agent, config, evaluation_seeds)
+        if checkpoint_results and checkpoint_results[-1]["step"] == completed_steps:
+            final_evaluation = checkpoint_results[-1]["evaluation"]
+        else:
+            final_evaluation = save_and_evaluate_checkpoint(
+                completed_steps, f"ckpt_final_{completed_steps}.pt"
+            )
     finally:
         env.close()
 
@@ -233,6 +384,10 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         "seed": seed,
         "initial_evaluation": initial_evaluation,
         "final_evaluation": final_evaluation,
+        "best_checkpoint": (
+            portable_path(best_checkpoint_path, ROOT) if best_checkpoint_path else None
+        ),
+        "checkpoint_metrics": portable_path(checkpoint_metrics_path, ROOT),
     }
     (output_dir / "training_report.json").write_text(json.dumps(report, indent=2) + "\n")
     return report

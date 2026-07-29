@@ -92,14 +92,18 @@ def compute_gae(
     last_value: torch.Tensor,
     gamma: float,
     gae_lambda: float,
+    bootstrap_values: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return generalized advantages and discounted value targets for one rollout."""
+    """Return GAE targets, bootstrapping time-limit truncations when provided."""
+    if bootstrap_values is None:
+        bootstrap_values = torch.zeros_like(values)
     advantages = torch.zeros_like(rewards)
     last_advantage = torch.zeros_like(last_value)
     for step in reversed(range(len(rewards))):
         next_value = last_value if step == len(rewards) - 1 else values[step + 1]
+        next_value = torch.where(dones[step].bool(), bootstrap_values[step], next_value)
         not_done = 1.0 - dones[step]
-        delta = rewards[step] + gamma * next_value * not_done - values[step]
+        delta = rewards[step] + gamma * next_value - values[step]
         last_advantage = delta + gamma * gae_lambda * not_done * last_advantage
         advantages[step] = last_advantage
     return advantages, advantages + values

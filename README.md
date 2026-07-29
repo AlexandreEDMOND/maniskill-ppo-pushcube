@@ -65,6 +65,11 @@ uv run scripts/train_custom_ppo.py \
   --output-dir runs/custom-ppo-cuda-500k
 ```
 
+The CUDA configuration saves and evaluates a checkpoint every 500,000 requested
+interactions on the fixed 20 CPU evaluation seeds. It keeps the selected model at
+`runs/<run>/checkpoints/best_ckpt.pt`; `checkpoint_metrics.json` records success,
+return, final distance, KL, clipping, losses, entropy, and action standard deviation.
+
 ## Documentation
 
 - [Roadmap](ROADMAP.md): current status, milestones, and completion criteria

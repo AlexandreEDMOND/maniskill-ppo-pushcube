@@ -37,6 +37,19 @@ class CustomPPOTests(unittest.TestCase):
             returns, torch.tensor([[1.8775, 1.0], [1.0, 1.45]])
         )
 
+    def test_gae_bootstraps_a_time_limit_truncation(self):
+        advantages, returns = compute_gae(
+            rewards=torch.tensor([1.0, 1.0]),
+            values=torch.tensor([0.5, 0.5]),
+            dones=torch.tensor([0.0, 1.0]),
+            last_value=torch.tensor(42.0),
+            bootstrap_values=torch.tensor([0.0, 42.0]),
+            gamma=0.9,
+            gae_lambda=0.95,
+        )
+        torch.testing.assert_close(advantages, torch.tensor([33.6965, 38.3]))
+        torch.testing.assert_close(returns, torch.tensor([34.1965, 38.8]))
+
     def test_clipped_loss_limits_positive_advantage(self):
         loss = clipped_policy_loss(
             new_log_probabilities=torch.tensor([math.log(1.3)]),
