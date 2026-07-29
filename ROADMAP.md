@@ -14,7 +14,7 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | Learning validation incomplete | The 5,000-step CPU run raises five-seed mean return from 1.90 to 6.64. At 50,000 steps, the shared 20-seed evaluation still reports 0% success and no distance improvement. |
+| Custom PPO | Integration validation complete; learning baseline deferred | The trainer now uses bounded Gaussian actions, and a 50,000-step CPU run raises shared-evaluator return from 2.07 to 7.60. It still reports 0/20 successes because that budget is only 0.1% of the official 50-million-step reference. |
 | Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
@@ -32,7 +32,7 @@ Implement a small state-based PPO trainer that uses the same task contract and e
 
 The short run is an integration check, not a competitive result: its 20-seed success rate remains 0%. The first full comparison must use the same environment-step budget and evaluation protocol as the official baseline.
 
-## Next milestone — demonstrate task completion
+## Completed diagnosis — 50k CPU custom PPO does not demonstrate task completion
 
 Run the custom PPO for 50,000 CPU interactions with the frozen configuration, then evaluate it with the shared 20-seed protocol.
 
@@ -43,9 +43,16 @@ uv run scripts/train_custom_ppo.py \
 uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 ```
 
-- [x] Record the success rate, return, and final cube-to-goal distance against the 5,000-step check. The 20-seed return rises from 7.11 to 8.12, while final distance changes from 0.2016 to 0.2026.
-- [ ] Confirm that the longer run produces at least one successful fixed-seed episode before treating it as a learning baseline. **Not met:** 0/20 successes at 50,000 steps.
-- [ ] If it does not, diagnose the training behavior before changing the frozen experiment conditions.
+- [x] Record the success rate, return, and final cube-to-goal distance. With bounded actions, the 20-seed return rises from 2.07 to 7.60; final distance is 0.2044 and success remains 0/20.
+- [x] Diagnose the absence of success. The prior trainer evaluated log-probabilities for unclipped Gaussian samples while the environment received clamped actions; this is fixed with a `tanh` action transform. The remaining 50k run is still only 0.1% of the 50M official budget, so it cannot establish a learning baseline.
+
+## Next milestone — matched-budget custom PPO comparison
+
+Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. This requires a vectorized CUDA trainer; the current single-environment CPU implementation is intentionally retained for integration tests only.
+
+- [ ] Implement or adopt vectorized CUDA rollout collection for the custom PPO.
+- [ ] Train and evaluate seed `9351` for 50 million interactions with the shared protocol.
+- [ ] Confirm at least one successful fixed-seed episode before starting ablations.
 
 ## Experiments after custom PPO
 

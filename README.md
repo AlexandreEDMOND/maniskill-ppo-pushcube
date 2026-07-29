@@ -6,7 +6,7 @@ A reproducible study of how reward shaping and initial-state randomization affec
 
 The environment and official ManiSkill PPO pipeline have been validated locally. The official CUDA baseline for seed `9351` is complete and reaches 100% success on the fixed 20-episode deterministic evaluation. Its checkpoint and evaluation are kept as local experiment artifacts, outside Git.
 
-The project now keeps that result as its reference run. The minimal custom PPO passes its CPU integration run: after 5,000 interactions, its mean return rises from 1.90 to 6.64 on five fixed seeds. A 50,000-step follow-up still reaches no task success on the shared 20-seed evaluation, so it is not yet a learning baseline. Additional official seeds will be run only when assembling final aggregate results.
+The project now keeps that result as its reference run. The minimal custom PPO uses bounded Gaussian actions and passes its CPU integration run. Its 50,000-step follow-up improves mean return, but still reaches no task success on the shared 20-seed evaluation. This is an integration check, not a performance comparison: 50,000 interactions are only 0.1% of the official 50-million-step budget. A custom learning baseline therefore requires a matched interaction budget on a vectorized CUDA trainer. Additional official seeds will be run only when assembling final aggregate results.
 
 See [ROADMAP.md](ROADMAP.md) for the authoritative progress tracker and next steps.
 

@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
-CHECKPOINT_FORMAT = "custom-ppo-v1"
+CHECKPOINT_FORMAT = "custom-ppo-v2"
+LEGACY_CHECKPOINT_FORMAT = "custom-ppo-v1"
+CHECKPOINT_FORMATS = (LEGACY_CHECKPOINT_FORMAT, CHECKPOINT_FORMAT)
 
 
 class CustomPPOAgent(nn.Module):
     """A compact Gaussian actor-critic for state observations."""
 
-    def __init__(self, observation_size: int, action_size: int, hidden_size: int):
+    def __init__(
+        self,
+        observation_size: int,
+        action_size: int,
+        hidden_size: int,
+        squash_actions: bool = True,
+    ):
         super().__init__()
+        self.squash_actions = squash_actions
         self.critic = nn.Sequential(
             nn.Linear(observation_size, hidden_size),
             nn.Tanh(),
@@ -33,9 +44,8 @@ class CustomPPOAgent(nn.Module):
     def get_action_and_value(
         self, observation: torch.Tensor, action: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        distribution = Normal(
-            self.actor_mean(observation), self.actor_logstd.exp().expand_as(self.actor_mean(observation))
-        )
+        actor_mean = self.actor_mean(observation)
+        distribution = Normal(actor_mean, self.actor_logstd.exp().expand_as(actor_mean))
         if action is None:
             action = distribution.sample()
         return (
@@ -45,8 +55,24 @@ class CustomPPOAgent(nn.Module):
             self.critic(observation).squeeze(-1),
         )
 
+    def environment_action(self, action: torch.Tensor) -> torch.Tensor:
+        """Map a latent Gaussian action into the environment's [-1, 1] range."""
+        return action.tanh() if self.squash_actions else action
+
+    def deterministic_action(self, observation: torch.Tensor) -> torch.Tensor:
+        """Return the action used for deterministic evaluation."""
+        return self.environment_action(self.actor_mean(observation))
+
     def value(self, observation: torch.Tensor) -> torch.Tensor:
         return self.critic(observation).squeeze(-1)
+
+
+def portable_path(path: Path, root: Path) -> str:
+    """Use a repository-relative path when possible, otherwise preserve the absolute path."""
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path.resolve())
 
 
 def compute_gae(

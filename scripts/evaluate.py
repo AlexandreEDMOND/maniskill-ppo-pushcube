@@ -18,7 +18,12 @@ import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 from mani_skill.utils.wrappers.record import RecordEpisode  # noqa: E402
 
-from custom_ppo import CHECKPOINT_FORMAT, CustomPPOAgent  # noqa: E402
+from custom_ppo import (  # noqa: E402
+    CHECKPOINT_FORMAT,
+    CHECKPOINT_FORMATS,
+    CustomPPOAgent,
+    portable_path,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/official_baseline.json"
@@ -69,7 +74,7 @@ def load_agent(checkpoint: Path, env) -> nn.Module:
     observation_size = env.observation_space.shape[-1]
     action_size = env.action_space.shape[-1]
     checkpoint_data = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    if checkpoint_data.get("format") == CHECKPOINT_FORMAT:
+    if checkpoint_data.get("format") in CHECKPOINT_FORMATS:
         if checkpoint_data["observation_size"] != observation_size:
             raise RuntimeError("Custom checkpoint observation size does not match the environment")
         if checkpoint_data["action_size"] != action_size:
@@ -78,6 +83,7 @@ def load_agent(checkpoint: Path, env) -> nn.Module:
             observation_size,
             action_size,
             checkpoint_data["hidden_size"],
+            squash_actions=checkpoint_data.get("squash_actions", False),
         )
         state_dict = checkpoint_data["state_dict"]
     else:
@@ -98,7 +104,11 @@ def run_episode(env, agent: nn.Module, seed: int) -> dict:
 
     while not done:
         with torch.inference_mode():
-            action = agent.actor_mean(observation)
+            action = (
+                agent.deterministic_action(observation)
+                if isinstance(agent, CustomPPOAgent)
+                else agent.actor_mean(observation)
+            )
         observation, reward, terminated, truncated, info = env.step(action)
         steps += 1
         episode_return += float(reward.item())
@@ -128,13 +138,6 @@ def mean_and_std(values: list[float]) -> dict[str, float]:
         "mean": statistics.fmean(values),
         "std": statistics.pstdev(values),
     }
-
-
-def portable_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(ROOT))
-    except ValueError:
-        return str(path.resolve())
 
 
 def aggregate(episodes: list[dict]) -> dict:
@@ -211,9 +214,9 @@ def main() -> None:
             CHECKPOINT_FORMAT if isinstance(agent, CustomPPOAgent) else config["name"]
         ),
         "evaluation_protocol": config["name"],
-        "checkpoint": portable_path(args.checkpoint),
+        "checkpoint": portable_path(args.checkpoint, ROOT),
         "checkpoint_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
-        "config": portable_path(args.config),
+        "config": portable_path(args.config, ROOT),
         "aggregate": aggregate(episodes),
         "episodes": episodes,
     }
@@ -224,7 +227,7 @@ def main() -> None:
             config["evaluation"]["video_seed"],
             output_dir,
         )
-        report["video"] = portable_path(video_path)
+        report["video"] = portable_path(video_path, ROOT)
 
     report_path = output_dir / "evaluation.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n")

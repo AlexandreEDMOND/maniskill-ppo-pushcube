@@ -8,7 +8,13 @@ import random
 from pathlib import Path
 
 from _platform import configure_macos_vulkan
-from custom_ppo import CHECKPOINT_FORMAT, CustomPPOAgent, clipped_policy_loss, compute_gae
+from custom_ppo import (
+    CHECKPOINT_FORMAT,
+    CustomPPOAgent,
+    clipped_policy_loss,
+    compute_gae,
+    portable_path,
+)
 
 configure_macos_vulkan()
 
@@ -46,7 +52,7 @@ def evaluate(agent: CustomPPOAgent, config: dict, seeds: list[int]) -> dict[str,
             success = False
             while not done:
                 with torch.inference_mode():
-                    action = agent.actor_mean(observation)
+                    action = agent.deterministic_action(observation)
                 observation, reward, terminated, truncated, info = env.step(action)
                 episode_return += float(reward.item())
                 success = success or bool(info["success"].item())
@@ -72,8 +78,6 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         action_size = env.action_space.shape[-1]
         agent = CustomPPOAgent(observation_size, action_size, training["hidden_size"])
         optimizer = torch.optim.Adam(agent.parameters(), lr=training["learning_rate"], eps=1e-5)
-        action_low = torch.as_tensor(env.action_space.low)
-        action_high = torch.as_tensor(env.action_space.high)
         evaluation_seeds = config["evaluation"]["seeds"]
         initial_evaluation = evaluate(agent, config, evaluation_seeds)
 
@@ -82,7 +86,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         while completed_steps < total_timesteps:
             rollout_steps = min(training["rollout_steps"], total_timesteps - completed_steps)
             observations = torch.zeros(rollout_steps, observation_size)
-            actions = torch.zeros(rollout_steps, action_size)
+            latent_actions = torch.zeros(rollout_steps, action_size)
             log_probabilities = torch.zeros(rollout_steps)
             rewards = torch.zeros(rollout_steps)
             dones = torch.zeros(rollout_steps)
@@ -91,12 +95,14 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
             for step in range(rollout_steps):
                 observations[step] = observation.squeeze(0)
                 with torch.no_grad():
-                    action, log_probability, _, value = agent.get_action_and_value(observation)
-                actions[step] = action.squeeze(0)
+                    latent_action, log_probability, _, value = agent.get_action_and_value(
+                        observation
+                    )
+                latent_actions[step] = latent_action.squeeze(0)
                 log_probabilities[step] = log_probability.item()
                 values[step] = value.item()
                 next_observation, reward, terminated, truncated, _ = env.step(
-                    action.clamp(action_low, action_high)
+                    agent.environment_action(latent_action)
                 )
                 done = bool((terminated | truncated).item())
                 rewards[step] = reward.item()
@@ -119,7 +125,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                 indices = torch.randperm(rollout_steps)
                 for batch_indices in indices.split(training["minibatch_size"]):
                     _, new_log_probabilities, entropy, new_values = agent.get_action_and_value(
-                        observations[batch_indices], actions[batch_indices]
+                        observations[batch_indices], latent_actions[batch_indices]
                     )
                     normalized_advantages = advantages[batch_indices]
                     normalized_advantages = (normalized_advantages - normalized_advantages.mean()) / (
@@ -146,6 +152,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                 "observation_size": observation_size,
                 "action_size": action_size,
                 "hidden_size": training["hidden_size"],
+                "squash_actions": agent.squash_actions,
                 "state_dict": agent.state_dict(),
             },
             checkpoint_path,
@@ -155,7 +162,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         env.close()
 
     report = {
-        "checkpoint": str(checkpoint_path.resolve().relative_to(ROOT)),
+        "checkpoint": portable_path(checkpoint_path, ROOT),
         "total_timesteps": completed_steps,
         "seed": seed,
         "initial_evaluation": initial_evaluation,
