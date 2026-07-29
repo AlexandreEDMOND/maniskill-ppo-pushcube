@@ -20,7 +20,7 @@
     "gae_lambda": 0.9,
     "clip_coefficient": 0.2,
     "value_coefficient": 0.5,
-    "entropy_coefficient": 0.001,
+    "entropy_coefficient": 0.005,
     "max_grad_norm": 0.5,
     "target_kl": 0.1,
     "checkpoint_interval_steps": 500000,

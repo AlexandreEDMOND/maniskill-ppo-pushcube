@@ -14,7 +14,7 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | 5M validation complete | Vectorized CUDA PPO now saves and selects periodic checkpoints using the fixed 20-seed CPU evaluator. The selected 508k checkpoint reaches 10/20 successes (50%); the 5M final checkpoint reaches 4/20 (20%). |
+| Custom PPO | 5M entropy validation complete | With entropy coefficient `0.005`, the selected 508k checkpoint reaches 16/20 successes (80%) on the fixed evaluator. The 5M final checkpoint falls to 0%, so best-checkpoint selection is mandatory. |
 | Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
@@ -51,7 +51,7 @@ uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. The vectorized CUDA trainer is ready; the single-environment CPU implementation remains the integration-test path.
 
 - [x] Implement vectorized CUDA rollout collection and validate a `4,096 × 4` rollout on the RTX 3090 (2,403 interactions/s).
-- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, and periodic checkpoint selection. In the 5M validation, `best_ckpt.pt` at 507,904 steps reaches 50% success on the shared evaluator, compared with 20% for the final checkpoint.
+- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, and periodic checkpoint selection. With entropy coefficient `0.005`, `best_ckpt.pt` at 507,904 steps reaches 80% success on the shared evaluator; the 5M final checkpoint reaches 0%.
 - [ ] Train and evaluate seed `9351` for 50 million interactions with the shared protocol.
 - [ ] Confirm at least one successful fixed-seed episode before starting ablations.
 
