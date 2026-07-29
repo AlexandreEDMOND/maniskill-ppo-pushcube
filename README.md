@@ -57,6 +57,12 @@ uv run scripts/train_custom_ppo.py \
   --config configs/custom_ppo_cuda.json \
   --output-dir runs/custom-ppo-cuda-9351
 uv run scripts/evaluate.py runs/custom-ppo-cuda-9351/final_ckpt.pt
+
+# First CUDA learning check (~1 minute on the validated RTX 3090 setup).
+uv run scripts/train_custom_ppo.py \
+  --config configs/custom_ppo_cuda.json \
+  --total-timesteps 500000 \
+  --output-dir runs/custom-ppo-cuda-500k
 ```
 
 ## Documentation

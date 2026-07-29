@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -26,6 +28,31 @@ from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv  # noqa: E40
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/custom_ppo_cpu.json"
+
+
+def format_duration(seconds: float) -> str:
+    """Format a non-negative duration for the training progress display."""
+    rounded_seconds = max(0, round(seconds))
+    minutes, seconds = divmod(rounded_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+
+
+def show_progress(completed_steps: int, planned_steps: int, start_time: float) -> None:
+    """Render one compact training progress line with throughput and ETA."""
+    elapsed = time.perf_counter() - start_time
+    rate = completed_steps / elapsed if elapsed else 0.0
+    remaining_steps = planned_steps - completed_steps
+    eta = remaining_steps / rate if rate else 0.0
+    width = 30
+    filled = round(width * completed_steps / planned_steps)
+    bar = "#" * filled + "-" * (width - filled)
+    message = (
+        f"Training [{bar}] {completed_steps / planned_steps:6.2%} "
+        f"{completed_steps:,}/{planned_steps:,} steps | {rate:,.0f} SPS "
+        f"| elapsed {format_duration(elapsed)} | ETA {format_duration(eta)}"
+    )
+    print(message, end="\r" if sys.stdout.isatty() else "\n", flush=True)
 
 
 def make_env(config: dict, num_envs: int = 1):
@@ -94,6 +121,12 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
     batch_size = num_envs * rollout_steps
     if total_timesteps < batch_size:
         raise ValueError("total_timesteps must cover at least one complete vector rollout")
+    planned_steps = math.ceil(total_timesteps / batch_size) * batch_size
+    if planned_steps != total_timesteps:
+        print(
+            f"Requested {total_timesteps:,} steps; vector rollouts will run "
+            f"{planned_steps:,} steps ({batch_size:,} per update)."
+        )
 
     env = make_training_env(config, num_envs)
     try:
@@ -113,7 +146,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         observation, _ = env.reset(seed=seed)
         completed_steps = 0
         start_time = time.perf_counter()
-        while completed_steps + batch_size <= total_timesteps:
+        while completed_steps < planned_steps:
             observations = torch.zeros(
                 rollout_steps, num_envs, observation_size, device=env.device
             )
@@ -182,6 +215,11 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(agent.parameters(), training["max_grad_norm"])
                     optimizer.step()
+            show_progress(completed_steps, planned_steps, start_time)
+
+        if sys.stdout.isatty():
+            print()
+        training_duration = time.perf_counter() - start_time
 
         output_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_path = output_dir / "final_ckpt.pt"
@@ -204,10 +242,11 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
 
     report = {
         "checkpoint": portable_path(checkpoint_path, ROOT),
+        "requested_timesteps": total_timesteps,
         "total_timesteps": completed_steps,
         "num_envs": num_envs,
         "rollout_steps": rollout_steps,
-        "throughput_steps_per_second": completed_steps / (time.perf_counter() - start_time),
+        "throughput_steps_per_second": completed_steps / training_duration,
         "seed": seed,
         "initial_evaluation": initial_evaluation,
         "final_evaluation": final_evaluation,
