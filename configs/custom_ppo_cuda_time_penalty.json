@@ -1,5 +1,5 @@
 {
-  "name": "custom-ppo-cuda",
+  "name": "custom-ppo-cuda-time-penalty",
   "environment": {
     "id": "PushCube-v1",
     "robot": "panda",
@@ -8,9 +8,12 @@
     "reward_mode": "normalized_dense",
     "simulation_backend": "physx_cuda"
   },
+  "reward": {
+    "time_penalty_per_step": 0.01
+  },
   "training": {
     "seed": 9351,
-    "total_timesteps": 50000000,
+    "total_timesteps": 3000000,
     "num_envs": 4096,
     "rollout_steps": 4,
     "update_epochs": 4,

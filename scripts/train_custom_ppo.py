@@ -164,6 +164,18 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         raise ValueError("checkpoint_interval_steps must be positive")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "config_snapshot.json").write_text(
+        json.dumps(
+            {
+                "config": config,
+                "requested_timesteps": total_timesteps,
+                "planned_timesteps": planned_steps,
+                "seed": seed,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     checkpoint_dir = output_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
     checkpoint_metrics_path = output_dir / "checkpoint_metrics.json"
@@ -182,6 +194,11 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         optimizer = torch.optim.Adam(agent.parameters(), lr=training["learning_rate"], eps=1e-5)
         evaluation_seeds = config["evaluation"]["seeds"]
         initial_evaluation = evaluate(agent, config, evaluation_seeds)
+        time_penalty_per_step = float(
+            config.get("reward", {}).get("time_penalty_per_step", 0.0)
+        )
+        if time_penalty_per_step < 0:
+            raise ValueError("time_penalty_per_step must be non-negative")
 
         checkpoint_results: list[dict] = []
         best_checkpoint_path: Path | None = None
@@ -209,6 +226,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
             }
             diagnostic_means["action_std_mean"] = agent.actor_logstd.exp().mean().item()
             diagnostic_means["action_std_min"] = agent.actor_logstd.exp().min().item()
+            diagnostic_means["learning_rate"] = optimizer.param_groups[0]["lr"]
             result = {
                 "step": step,
                 "checkpoint": portable_path(checkpoint_path, ROOT),
@@ -244,6 +262,11 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
             dynamic_ncols=True,
         ) as progress:
             while completed_steps < planned_steps:
+                if training.get("anneal_learning_rate", False):
+                    progress_fraction = completed_steps / planned_steps
+                    optimizer.param_groups[0]["lr"] = training["learning_rate"] * (
+                        1.0 - progress_fraction
+                    )
                 observations = torch.zeros(
                     rollout_steps, num_envs, observation_size, device=env.device
                 )
@@ -270,7 +293,7 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                     next_observation, reward, terminated, truncated, info = env.step(
                         agent.environment_action(latent_action)
                     )
-                    rewards[step] = reward
+                    rewards[step] = reward - time_penalty_per_step
                     dones[step] = (terminated | truncated).float()
                     if truncated.any():
                         with torch.no_grad():

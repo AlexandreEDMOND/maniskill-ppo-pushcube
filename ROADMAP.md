@@ -14,8 +14,8 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | 5M entropy validation complete | With entropy coefficient `0.005`, the selected 508k checkpoint reaches 16/20 successes (80%) on the fixed evaluator. The 5M final checkpoint falls to 0%, so best-checkpoint selection is mandatory. |
-| Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
+| Custom PPO | 3M stabilization pilot complete | Periodic selection, learning-rate decay, and four update epochs reach 17/20 successes (85%) on the fixed evaluator. The standard dense-reward selected policy reaches success in 15.6 steps on average. |
+| Reward experiment C | Pilot complete; replication pending | A `-0.01` per-step reward cost also reaches 17/20 and is more stable late in one run, but reaches success more slowly (30.7 steps). Repeat across three seeds before drawing a conclusion. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
 Experiment outputs remain ignored by Git. The `9351` artifacts above are therefore local evidence, not versioned project files.
@@ -51,9 +51,9 @@ uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. The vectorized CUDA trainer is ready; the single-environment CPU implementation remains the integration-test path.
 
 - [x] Implement vectorized CUDA rollout collection and validate a `4,096 × 4` rollout on the RTX 3090 (2,403 interactions/s).
-- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, and periodic checkpoint selection. With entropy coefficient `0.005`, `best_ckpt.pt` at 507,904 steps reaches 80% success on the shared evaluator; the 5M final checkpoint reaches 0%.
+- [x] Add time-limit value bootstrapping, KL/clipping/entropy diagnostics, periodic checkpoint selection, learning-rate decay, and conservative four-epoch updates. The 3M standard-reward pilot selects a 17/20-success checkpoint.
 - [ ] Train and evaluate seed `9351` for 50 million interactions with the shared protocol.
-- [ ] Confirm at least one successful fixed-seed episode before starting ablations.
+- [x] Confirm successful fixed-seed episodes before starting ablations.
 
 ## Experiments after custom PPO
 
@@ -63,7 +63,7 @@ Run each condition with the same interaction budget, evaluation seeds, and repor
 | --- | --- | --- |
 | A | Dense reward with reduced initial-state randomization | Confirm the full training pipeline on an easier setting. |
 | B | Dense reward with standard randomization | Establish the primary reference condition. |
-| C | Sparse or explicitly modified dense reward with standard randomization | Measure the contribution of reward information. |
+| C | Sparse or explicitly modified dense reward with standard randomization | Measure the contribution of reward information. The `-0.01` per-step pilot is complete for one seed; replicate it. |
 
 For each condition, report success rate, return, episode length, steps to success, final cube-to-goal distance, throughput, wall time, configuration, seed, code revision, and dependency versions. Produce aggregate learning curves, a final mean +/- standard-deviation table, and fixed-seed videos.
 
