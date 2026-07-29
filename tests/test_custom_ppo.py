@@ -21,6 +21,22 @@ class CustomPPOTests(unittest.TestCase):
         torch.testing.assert_close(advantages, torch.tensor([1.3775, 0.5]))
         torch.testing.assert_close(returns, torch.tensor([1.8775, 1.0]))
 
+    def test_gae_handles_parallel_episode_boundaries(self):
+        advantages, returns = compute_gae(
+            rewards=torch.tensor([[1.0, 1.0], [1.0, 1.0]]),
+            values=torch.tensor([[0.5, 0.5], [0.5, 0.5]]),
+            dones=torch.tensor([[0.0, 1.0], [1.0, 0.0]]),
+            last_value=torch.tensor([42.0, 0.5]),
+            gamma=0.9,
+            gae_lambda=0.95,
+        )
+        torch.testing.assert_close(
+            advantages, torch.tensor([[1.3775, 0.5], [0.5, 0.95]])
+        )
+        torch.testing.assert_close(
+            returns, torch.tensor([[1.8775, 1.0], [1.0, 1.45]])
+        )
+
     def test_clipped_loss_limits_positive_advantage(self):
         loss = clipped_policy_loss(
             new_log_probabilities=torch.tensor([math.log(1.3)]),

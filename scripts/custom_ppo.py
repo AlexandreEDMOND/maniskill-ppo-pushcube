@@ -22,24 +22,34 @@ class CustomPPOAgent(nn.Module):
         action_size: int,
         hidden_size: int,
         squash_actions: bool = True,
+        hidden_layers: int = 2,
+        initial_logstd: float = -0.5,
     ):
         super().__init__()
+        if hidden_layers < 1:
+            raise ValueError("hidden_layers must be at least one")
         self.squash_actions = squash_actions
-        self.critic = nn.Sequential(
-            nn.Linear(observation_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 1),
+        self.hidden_layers = hidden_layers
+        self.initial_logstd = initial_logstd
+        self.critic = self._make_mlp(observation_size, hidden_size, 1, hidden_layers)
+        self.actor_mean = self._make_mlp(
+            observation_size, hidden_size, action_size, hidden_layers
         )
-        self.actor_mean = nn.Sequential(
-            nn.Linear(observation_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, action_size),
+        self.actor_logstd = nn.Parameter(
+            torch.full((1, action_size), initial_logstd)
         )
-        self.actor_logstd = nn.Parameter(torch.full((1, action_size), -0.5))
+
+    @staticmethod
+    def _make_mlp(
+        input_size: int, hidden_size: int, output_size: int, hidden_layers: int
+    ) -> nn.Sequential:
+        layers: list[nn.Module] = []
+        previous_size = input_size
+        for _ in range(hidden_layers):
+            layers.extend((nn.Linear(previous_size, hidden_size), nn.Tanh()))
+            previous_size = hidden_size
+        layers.append(nn.Linear(previous_size, output_size))
+        return nn.Sequential(*layers)
 
     def get_action_and_value(
         self, observation: torch.Tensor, action: torch.Tensor | None = None

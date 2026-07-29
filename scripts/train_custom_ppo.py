@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 from pathlib import Path
 
 from _platform import configure_macos_vulkan
@@ -21,12 +22,13 @@ configure_macos_vulkan()
 import gymnasium as gym  # noqa: E402
 import mani_skill.envs  # noqa: E402,F401
 import torch  # noqa: E402
+from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/custom_ppo_cpu.json"
 
 
-def make_env(config: dict):
+def make_env(config: dict, num_envs: int = 1):
     environment = config["environment"]
     return gym.make(
         environment["id"],
@@ -36,7 +38,22 @@ def make_env(config: dict):
         reward_mode=environment["reward_mode"],
         sim_backend=environment["simulation_backend"],
         render_mode=None,
-        num_envs=1,
+        num_envs=num_envs,
+        reconfiguration_freq=0,
+    )
+
+
+def make_training_env(config: dict, num_envs: int) -> ManiSkillVectorEnv:
+    """Create an autoresetting vector environment for rollout collection."""
+    environment = config["environment"]
+    if environment["simulation_backend"] == "physx_cuda" and not torch.cuda.is_available():
+        raise RuntimeError("The CUDA PPO configuration requires a CUDA-enabled PyTorch build")
+    return ManiSkillVectorEnv(
+        make_env(config, num_envs=num_envs),
+        num_envs=num_envs,
+        auto_reset=True,
+        ignore_terminations=False,
+        record_metrics=True,
     )
 
 
@@ -72,46 +89,61 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
     random.seed(seed)
     torch.manual_seed(seed)
 
-    env = make_env(config)
+    num_envs = training.get("num_envs", 1)
+    rollout_steps = training["rollout_steps"]
+    batch_size = num_envs * rollout_steps
+    if total_timesteps < batch_size:
+        raise ValueError("total_timesteps must cover at least one complete vector rollout")
+
+    env = make_training_env(config, num_envs)
     try:
-        observation_size = env.observation_space.shape[-1]
-        action_size = env.action_space.shape[-1]
-        agent = CustomPPOAgent(observation_size, action_size, training["hidden_size"])
+        observation_size = env.single_observation_space.shape[-1]
+        action_size = env.single_action_space.shape[-1]
+        agent = CustomPPOAgent(
+            observation_size,
+            action_size,
+            training["hidden_size"],
+            hidden_layers=training.get("hidden_layers", 2),
+            initial_logstd=training.get("initial_logstd", -0.5),
+        ).to(env.device)
         optimizer = torch.optim.Adam(agent.parameters(), lr=training["learning_rate"], eps=1e-5)
         evaluation_seeds = config["evaluation"]["seeds"]
         initial_evaluation = evaluate(agent, config, evaluation_seeds)
 
         observation, _ = env.reset(seed=seed)
         completed_steps = 0
-        while completed_steps < total_timesteps:
-            rollout_steps = min(training["rollout_steps"], total_timesteps - completed_steps)
-            observations = torch.zeros(rollout_steps, observation_size)
-            latent_actions = torch.zeros(rollout_steps, action_size)
-            log_probabilities = torch.zeros(rollout_steps)
-            rewards = torch.zeros(rollout_steps)
-            dones = torch.zeros(rollout_steps)
-            values = torch.zeros(rollout_steps)
+        start_time = time.perf_counter()
+        while completed_steps + batch_size <= total_timesteps:
+            observations = torch.zeros(
+                rollout_steps, num_envs, observation_size, device=env.device
+            )
+            latent_actions = torch.zeros(
+                rollout_steps, num_envs, action_size, device=env.device
+            )
+            log_probabilities = torch.zeros(rollout_steps, num_envs, device=env.device)
+            rewards = torch.zeros(rollout_steps, num_envs, device=env.device)
+            dones = torch.zeros(rollout_steps, num_envs, device=env.device)
+            values = torch.zeros(rollout_steps, num_envs, device=env.device)
 
             for step in range(rollout_steps):
-                observations[step] = observation.squeeze(0)
+                observations[step] = observation
                 with torch.no_grad():
                     latent_action, log_probability, _, value = agent.get_action_and_value(
                         observation
                     )
-                latent_actions[step] = latent_action.squeeze(0)
-                log_probabilities[step] = log_probability.item()
-                values[step] = value.item()
+                latent_actions[step] = latent_action
+                log_probabilities[step] = log_probability
+                values[step] = value
                 next_observation, reward, terminated, truncated, _ = env.step(
                     agent.environment_action(latent_action)
                 )
-                done = bool((terminated | truncated).item())
-                rewards[step] = reward.item()
-                dones[step] = float(done)
-                observation, _ = env.reset() if done else (next_observation, {})
-                completed_steps += 1
+                rewards[step] = reward
+                dones[step] = (terminated | truncated).float()
+                observation = next_observation
+                completed_steps += num_envs
 
             with torch.no_grad():
-                last_value = agent.value(observation).squeeze(0)
+                last_value = agent.value(observation)
                 advantages, returns = compute_gae(
                     rewards,
                     values,
@@ -121,23 +153,30 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                     training["gae_lambda"],
                 )
 
+            flat_observations = observations.flatten(0, 1)
+            flat_latent_actions = latent_actions.flatten(0, 1)
+            flat_log_probabilities = log_probabilities.flatten()
+            flat_advantages = advantages.flatten()
+            flat_returns = returns.flatten()
             for _ in range(training["update_epochs"]):
-                indices = torch.randperm(rollout_steps)
+                indices = torch.randperm(batch_size, device=env.device)
                 for batch_indices in indices.split(training["minibatch_size"]):
                     _, new_log_probabilities, entropy, new_values = agent.get_action_and_value(
-                        observations[batch_indices], latent_actions[batch_indices]
+                        flat_observations[batch_indices], flat_latent_actions[batch_indices]
                     )
-                    normalized_advantages = advantages[batch_indices]
+                    normalized_advantages = flat_advantages[batch_indices]
                     normalized_advantages = (normalized_advantages - normalized_advantages.mean()) / (
                         normalized_advantages.std(unbiased=False) + 1e-8
                     )
                     policy_loss = clipped_policy_loss(
                         new_log_probabilities,
-                        log_probabilities[batch_indices],
+                        flat_log_probabilities[batch_indices],
                         normalized_advantages,
                         training["clip_coefficient"],
                     )
-                    value_loss = torch.nn.functional.mse_loss(new_values, returns[batch_indices])
+                    value_loss = torch.nn.functional.mse_loss(
+                        new_values, flat_returns[batch_indices]
+                    )
                     loss = policy_loss + training["value_coefficient"] * value_loss - training["entropy_coefficient"] * entropy.mean()
                     optimizer.zero_grad()
                     loss.backward()
@@ -152,6 +191,8 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
                 "observation_size": observation_size,
                 "action_size": action_size,
                 "hidden_size": training["hidden_size"],
+                "hidden_layers": agent.hidden_layers,
+                "initial_logstd": agent.initial_logstd,
                 "squash_actions": agent.squash_actions,
                 "state_dict": agent.state_dict(),
             },
@@ -164,6 +205,9 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
     report = {
         "checkpoint": portable_path(checkpoint_path, ROOT),
         "total_timesteps": completed_steps,
+        "num_envs": num_envs,
+        "rollout_steps": rollout_steps,
+        "throughput_steps_per_second": completed_steps / (time.perf_counter() - start_time),
         "seed": seed,
         "initial_evaluation": initial_evaluation,
         "final_evaluation": final_evaluation,

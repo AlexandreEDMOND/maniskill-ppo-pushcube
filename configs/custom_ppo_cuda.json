@@ -1,0 +1,32 @@
+{
+  "name": "custom-ppo-cuda",
+  "environment": {
+    "id": "PushCube-v1",
+    "robot": "panda",
+    "observation_mode": "state",
+    "control_mode": "pd_joint_delta_pos",
+    "reward_mode": "normalized_dense",
+    "simulation_backend": "physx_cuda"
+  },
+  "training": {
+    "seed": 9351,
+    "total_timesteps": 50000000,
+    "num_envs": 4096,
+    "rollout_steps": 4,
+    "update_epochs": 8,
+    "minibatch_size": 512,
+    "learning_rate": 0.0003,
+    "gamma": 0.8,
+    "gae_lambda": 0.9,
+    "clip_coefficient": 0.2,
+    "value_coefficient": 0.5,
+    "entropy_coefficient": 0.0,
+    "max_grad_norm": 0.5,
+    "hidden_size": 256,
+    "hidden_layers": 3,
+    "initial_logstd": 0.0
+  },
+  "evaluation": {
+    "seeds": [10000, 10001, 10002, 10003, 10004]
+  }
+}

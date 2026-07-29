@@ -84,6 +84,8 @@ def load_agent(checkpoint: Path, env) -> nn.Module:
             action_size,
             checkpoint_data["hidden_size"],
             squash_actions=checkpoint_data.get("squash_actions", False),
+            hidden_layers=checkpoint_data.get("hidden_layers", 2),
+            initial_logstd=checkpoint_data.get("initial_logstd", -0.5),
         )
         state_dict = checkpoint_data["state_dict"]
     else:

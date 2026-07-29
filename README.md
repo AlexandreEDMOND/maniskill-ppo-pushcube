@@ -51,12 +51,19 @@ uv run scripts/run_official_baseline.py --profile official --seed 9351
 # Train the minimal custom PPO locally, then evaluate it with the shared evaluator.
 uv run scripts/train_custom_ppo.py
 uv run scripts/evaluate.py runs/custom-ppo-cpu/final_ckpt.pt --no-video
+
+# Run the vectorized CUDA custom PPO on Linux/NVIDIA (long training run).
+uv run scripts/train_custom_ppo.py \
+  --config configs/custom_ppo_cuda.json \
+  --output-dir runs/custom-ppo-cuda-9351
+uv run scripts/evaluate.py runs/custom-ppo-cuda-9351/final_ckpt.pt
 ```
 
 ## Documentation
 
 - [Roadmap](ROADMAP.md): current status, milestones, and completion criteria
 - [Custom PPO CPU configuration](configs/custom_ppo_cpu.json): short local training run
+- [Custom PPO CUDA configuration](configs/custom_ppo_cuda.json): vectorized matched-budget run
 - [Experiment plan](docs/EXPERIMENT_PLAN.md): frozen comparison protocol and metrics
 - [Official baseline](docs/OFFICIAL_BASELINE.md): upstream provenance and parameters
 - [Toulouse GPU runbook](docs/TOULOUSE_GPU_RUNBOOK.md): Linux/RTX 3090 setup and commands

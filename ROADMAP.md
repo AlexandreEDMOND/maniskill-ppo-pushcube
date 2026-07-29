@@ -14,7 +14,7 @@ Produce a small, reproducible PPO study on ManiSkill's `PushCube-v1`: first esta
 | Official PPO integration | Complete | The upstream trainer, checkpointing, evaluator, and video pipeline work end to end locally. |
 | Official baseline, seed `9351` | Complete | 50 million CUDA interactions; fixed deterministic evaluation: 20/20 successes (100%). Local artifacts: `artifacts/pushcube-9351/` and `artifacts/evaluations/official-9351/`. |
 | Official aggregate result | Deferred | Keep `9351` as the reference run now; add other seeds only for the final aggregate report. |
-| Custom PPO | Integration validation complete; learning baseline deferred | The trainer now uses bounded Gaussian actions, and a 50,000-step CPU run raises shared-evaluator return from 2.07 to 7.60. It still reports 0/20 successes because that budget is only 0.1% of the official 50-million-step reference. |
+| Custom PPO | CUDA baseline ready | The trainer now uses bounded Gaussian actions and vectorized CUDA rollouts. A 4,096-environment smoke run completes at 2,403 interactions/s; the 50M matched-budget run is ready to launch. |
 | Reward/randomization experiments | Not started | Protocol is defined in `docs/EXPERIMENT_PLAN.md`. |
 | Curriculum comparison | Not started | Depends on a stable standard-task implementation. |
 
@@ -48,9 +48,9 @@ uv run scripts/evaluate.py runs/custom-ppo-cpu-50k/final_ckpt.pt
 
 ## Next milestone — matched-budget custom PPO comparison
 
-Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. This requires a vectorized CUDA trainer; the current single-environment CPU implementation is intentionally retained for integration tests only.
+Scale the custom implementation to the same 50-million-interaction budget and fixed 20-seed evaluator as the official baseline. The vectorized CUDA trainer is ready; the single-environment CPU implementation remains the integration-test path.
 
-- [ ] Implement or adopt vectorized CUDA rollout collection for the custom PPO.
+- [x] Implement vectorized CUDA rollout collection and validate a `4,096 × 4` rollout on the RTX 3090 (2,403 interactions/s).
 - [ ] Train and evaluate seed `9351` for 50 million interactions with the shared protocol.
 - [ ] Confirm at least one successful fixed-seed episode before starting ablations.
 
