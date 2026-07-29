@@ -6,7 +6,6 @@ import argparse
 import json
 import math
 import random
-import sys
 import time
 from pathlib import Path
 
@@ -25,34 +24,10 @@ import gymnasium as gym  # noqa: E402
 import mani_skill.envs  # noqa: E402,F401
 import torch  # noqa: E402
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv  # noqa: E402
+from tqdm.auto import tqdm  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/custom_ppo_cpu.json"
-
-
-def format_duration(seconds: float) -> str:
-    """Format a non-negative duration for the training progress display."""
-    rounded_seconds = max(0, round(seconds))
-    minutes, seconds = divmod(rounded_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:d}:{minutes:02d}:{seconds:02d}"
-
-
-def show_progress(completed_steps: int, planned_steps: int, start_time: float) -> None:
-    """Render one compact training progress line with throughput and ETA."""
-    elapsed = time.perf_counter() - start_time
-    rate = completed_steps / elapsed if elapsed else 0.0
-    remaining_steps = planned_steps - completed_steps
-    eta = remaining_steps / rate if rate else 0.0
-    width = 30
-    filled = round(width * completed_steps / planned_steps)
-    bar = "#" * filled + "-" * (width - filled)
-    message = (
-        f"Training [{bar}] {completed_steps / planned_steps:6.2%} "
-        f"{completed_steps:,}/{planned_steps:,} steps | {rate:,.0f} SPS "
-        f"| elapsed {format_duration(elapsed)} | ETA {format_duration(eta)}"
-    )
-    print(message, end="\r" if sys.stdout.isatty() else "\n", flush=True)
 
 
 def make_env(config: dict, num_envs: int = 1):
@@ -146,79 +121,87 @@ def train(config: dict, output_dir: Path, total_timesteps: int, seed: int) -> di
         observation, _ = env.reset(seed=seed)
         completed_steps = 0
         start_time = time.perf_counter()
-        while completed_steps < planned_steps:
-            observations = torch.zeros(
-                rollout_steps, num_envs, observation_size, device=env.device
-            )
-            latent_actions = torch.zeros(
-                rollout_steps, num_envs, action_size, device=env.device
-            )
-            log_probabilities = torch.zeros(rollout_steps, num_envs, device=env.device)
-            rewards = torch.zeros(rollout_steps, num_envs, device=env.device)
-            dones = torch.zeros(rollout_steps, num_envs, device=env.device)
-            values = torch.zeros(rollout_steps, num_envs, device=env.device)
+        with tqdm(
+            total=planned_steps,
+            desc="Training",
+            unit="step",
+            unit_scale=True,
+            dynamic_ncols=True,
+        ) as progress:
+            while completed_steps < planned_steps:
+                observations = torch.zeros(
+                    rollout_steps, num_envs, observation_size, device=env.device
+                )
+                latent_actions = torch.zeros(
+                    rollout_steps, num_envs, action_size, device=env.device
+                )
+                log_probabilities = torch.zeros(rollout_steps, num_envs, device=env.device)
+                rewards = torch.zeros(rollout_steps, num_envs, device=env.device)
+                dones = torch.zeros(rollout_steps, num_envs, device=env.device)
+                values = torch.zeros(rollout_steps, num_envs, device=env.device)
 
-            for step in range(rollout_steps):
-                observations[step] = observation
+                for step in range(rollout_steps):
+                    observations[step] = observation
+                    with torch.no_grad():
+                        latent_action, log_probability, _, value = agent.get_action_and_value(
+                            observation
+                        )
+                    latent_actions[step] = latent_action
+                    log_probabilities[step] = log_probability
+                    values[step] = value
+                    next_observation, reward, terminated, truncated, _ = env.step(
+                        agent.environment_action(latent_action)
+                    )
+                    rewards[step] = reward
+                    dones[step] = (terminated | truncated).float()
+                    observation = next_observation
+                    completed_steps += num_envs
+
                 with torch.no_grad():
-                    latent_action, log_probability, _, value = agent.get_action_and_value(
-                        observation
+                    last_value = agent.value(observation)
+                    advantages, returns = compute_gae(
+                        rewards,
+                        values,
+                        dones,
+                        last_value,
+                        training["gamma"],
+                        training["gae_lambda"],
                     )
-                latent_actions[step] = latent_action
-                log_probabilities[step] = log_probability
-                values[step] = value
-                next_observation, reward, terminated, truncated, _ = env.step(
-                    agent.environment_action(latent_action)
-                )
-                rewards[step] = reward
-                dones[step] = (terminated | truncated).float()
-                observation = next_observation
-                completed_steps += num_envs
 
-            with torch.no_grad():
-                last_value = agent.value(observation)
-                advantages, returns = compute_gae(
-                    rewards,
-                    values,
-                    dones,
-                    last_value,
-                    training["gamma"],
-                    training["gae_lambda"],
-                )
-
-            flat_observations = observations.flatten(0, 1)
-            flat_latent_actions = latent_actions.flatten(0, 1)
-            flat_log_probabilities = log_probabilities.flatten()
-            flat_advantages = advantages.flatten()
-            flat_returns = returns.flatten()
-            for _ in range(training["update_epochs"]):
-                indices = torch.randperm(batch_size, device=env.device)
-                for batch_indices in indices.split(training["minibatch_size"]):
-                    _, new_log_probabilities, entropy, new_values = agent.get_action_and_value(
-                        flat_observations[batch_indices], flat_latent_actions[batch_indices]
-                    )
-                    normalized_advantages = flat_advantages[batch_indices]
-                    normalized_advantages = (normalized_advantages - normalized_advantages.mean()) / (
-                        normalized_advantages.std(unbiased=False) + 1e-8
-                    )
-                    policy_loss = clipped_policy_loss(
-                        new_log_probabilities,
-                        flat_log_probabilities[batch_indices],
-                        normalized_advantages,
-                        training["clip_coefficient"],
-                    )
-                    value_loss = torch.nn.functional.mse_loss(
-                        new_values, flat_returns[batch_indices]
-                    )
-                    loss = policy_loss + training["value_coefficient"] * value_loss - training["entropy_coefficient"] * entropy.mean()
-                    optimizer.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(agent.parameters(), training["max_grad_norm"])
-                    optimizer.step()
-            show_progress(completed_steps, planned_steps, start_time)
-
-        if sys.stdout.isatty():
-            print()
+                flat_observations = observations.flatten(0, 1)
+                flat_latent_actions = latent_actions.flatten(0, 1)
+                flat_log_probabilities = log_probabilities.flatten()
+                flat_advantages = advantages.flatten()
+                flat_returns = returns.flatten()
+                for _ in range(training["update_epochs"]):
+                    indices = torch.randperm(batch_size, device=env.device)
+                    for batch_indices in indices.split(training["minibatch_size"]):
+                        _, new_log_probabilities, entropy, new_values = agent.get_action_and_value(
+                            flat_observations[batch_indices], flat_latent_actions[batch_indices]
+                        )
+                        normalized_advantages = flat_advantages[batch_indices]
+                        normalized_advantages = (
+                            normalized_advantages - normalized_advantages.mean()
+                        ) / (normalized_advantages.std(unbiased=False) + 1e-8)
+                        policy_loss = clipped_policy_loss(
+                            new_log_probabilities,
+                            flat_log_probabilities[batch_indices],
+                            normalized_advantages,
+                            training["clip_coefficient"],
+                        )
+                        value_loss = torch.nn.functional.mse_loss(
+                            new_values, flat_returns[batch_indices]
+                        )
+                        loss = (
+                            policy_loss
+                            + training["value_coefficient"] * value_loss
+                            - training["entropy_coefficient"] * entropy.mean()
+                        )
+                        optimizer.zero_grad()
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(agent.parameters(), training["max_grad_norm"])
+                        optimizer.step()
+                progress.update(batch_size)
         training_duration = time.perf_counter() - start_time
 
         output_dir.mkdir(parents=True, exist_ok=True)
